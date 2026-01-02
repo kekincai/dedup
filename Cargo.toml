@@ -2,47 +2,52 @@
 name = "dedup"
 version = "0.1.0"
 edition = "2021"
-description = "Cross-platform file indexing and deduplication tool"
+description = "跨平台文件索引与查重工具"
 license = "MIT"
+authors = ["kejincai"]
+repository = "https://github.com/kejincai/dedup"
 
 [dependencies]
-# CLI
+# 命令行解析
 clap = { version = "4", features = ["derive"] }
 
-# Database
+# 数据库
 rusqlite = { version = "0.31", features = ["bundled"] }
 
-# Hashing
+# 哈希算法
 blake3 = "1"
 md5 = "0.7"
 
-# Serialization
+# 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 csv = "1"
 
-# Async & Parallelism
+# 并行处理
 rayon = "1"
 
-# File system
+# 文件系统遍历
 walkdir = "2"
 
-# Time
+# 时间处理
 chrono = { version = "0.4", features = ["serde"] }
 
-# Error handling
+# 错误处理
 anyhow = "1"
 thiserror = "1"
 
-# Progress bar
+# 进度条
 indicatif = "0.17"
 
-# Byte size formatting
+# 文件大小格式化
 bytesize = "1"
 
-# Logging
+# 日志
 log = "0.4"
 env_logger = "0.11"
+
+# 文件夹选择对话框
+rfd = "0.15"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
@@ -52,6 +57,9 @@ windows = { version = "0.58", features = [
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 lto = true
