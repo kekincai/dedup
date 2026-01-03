@@ -42,7 +42,7 @@ fn main() -> Result<()> {
         println!("双击运行模式：将弹出文件夹选择对话框进行索引\n");
 
         let default_args = IndexArgs {
-            path: None,
+            path: vec![],
             db: PathBuf::from("dedup.db"),
             fast_hash: true,
             full_hash: true,
@@ -51,7 +51,12 @@ fn main() -> Result<()> {
 
         let result = cli::cmd_index(default_args);
 
-        // 双击运行时暂停，让用户看到结果
+        // 显示完成提示
+        if result.is_ok() {
+            println!("\n✅ 索引完成！");
+        }
+
+        // 等待用户确认（双击运行时让用户看到结果）
         println!("\n按 Enter 键退出...");
         let mut input = String::new();
         let _ = std::io::stdin().read_line(&mut input);

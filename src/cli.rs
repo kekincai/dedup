@@ -8,7 +8,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 
 use crate::core::Scanner;
-use crate::infra::dialog::pick_folder;
+use crate::infra::dialog::pick_multiple_folders;
 use crate::infra::error::DedupError;
 use crate::infra::{export_csv, export_json, Database};
 
@@ -44,8 +44,8 @@ pub enum Commands {
 /// index 命令参数
 #[derive(Parser)]
 pub struct IndexArgs {
-    /// 要索引的目录路径（不指定则弹出选择对话框）
-    pub path: Option<PathBuf>,
+    /// 要索引的目录路径（可指定多个，不指定则弹出选择对话框）
+    pub path: Vec<PathBuf>,
     /// 数据库文件路径
     #[arg(long, default_value = "dedup.db")]
     pub db: PathBuf,
@@ -63,8 +63,8 @@ pub struct IndexArgs {
 /// update 命令参数
 #[derive(Parser)]
 pub struct UpdateArgs {
-    /// 要更新的目录路径（不指定则弹出选择对话框）
-    pub path: Option<PathBuf>,
+    /// 要更新的目录路径（可指定多个，不指定则弹出选择对话框）
+    pub path: Vec<PathBuf>,
     /// 数据库文件路径
     #[arg(long, default_value = "dedup.db")]
     pub db: PathBuf,
@@ -167,20 +167,20 @@ fn create_progress_bar(total: u64, msg: &str) -> ProgressBar {
     pb
 }
 
-/// 获取目录路径
+/// 获取目录路径列表
 ///
 /// 如果命令行指定了路径，使用指定的路径
-/// 否则弹出文件夹选择对话框
-fn get_directory_path(path: Option<PathBuf>, title: &str) -> Result<PathBuf> {
-    match path {
-        Some(p) => Ok(p),
-        None => {
-            println!("未指定目录，正在打开文件夹选择对话框...");
-            pick_folder(title).map_err(|e| match e {
-                DedupError::Cancelled => anyhow::anyhow!("用户取消了操作"),
-                _ => anyhow::anyhow!("{}", e),
-            })
-        }
+/// 否则弹出文件夹选择对话框（支持多选）
+fn get_directory_paths(paths: Vec<PathBuf>, title: &str) -> Result<Vec<PathBuf>> {
+    if paths.is_empty() {
+        println!("未指定目录，正在打开文件夹选择对话框...");
+        println!("提示：可多次选择文件夹，点击取消结束选择\n");
+        pick_multiple_folders(title).map_err(|e| match e {
+            DedupError::Cancelled => anyhow::anyhow!("用户取消了操作"),
+            _ => anyhow::anyhow!("{}", e),
+        })
+    } else {
+        Ok(paths)
     }
 }
 
@@ -190,64 +190,81 @@ fn get_directory_path(path: Option<PathBuf>, title: &str) -> Result<PathBuf> {
 
 /// 执行 index 命令
 pub fn cmd_index(args: IndexArgs) -> Result<()> {
-    let path = get_directory_path(args.path, "选择要索引的文件夹")?;
-    println!("正在索引: {:?}", path);
+    let paths = get_directory_paths(args.path, "选择要索引的文件夹")?;
 
     // 打开数据库
     let mut db = Database::open(&args.db)?;
     db.init()?;
 
-    // 扫描目录
     let scanner = Scanner::new(args.workers);
-    let entries = scanner.scan_directory(&path)?;
 
-    // 显示进度条
-    let pb = create_progress_bar(entries.len() as u64, "索引文件");
+    for path in &paths {
+        println!("\n正在索引: {:?}", path);
 
-    // 处理每个文件
-    for entry in entries {
-        db.upsert_file(&entry, args.fast_hash, args.full_hash)?;
-        pb.inc(1);
+        // 扫描目录
+        let entries = scanner.scan_directory(path)?;
+
+        // 显示进度条
+        let pb = create_progress_bar(entries.len() as u64, "索引文件");
+
+        // 处理每个文件
+        for entry in entries {
+            db.upsert_file(&entry, args.fast_hash, args.full_hash)?;
+            pb.inc(1);
+        }
+
+        pb.finish_with_message("完成");
     }
 
-    pb.finish_with_message("索引完成");
-    println!("已索引 {} 个文件", db.file_count()?);
+    println!("\n已索引 {} 个文件", db.file_count()?);
 
     Ok(())
 }
 
 /// 执行 update 命令
 pub fn cmd_update(args: UpdateArgs) -> Result<()> {
-    let path = get_directory_path(args.path, "选择要更新的文件夹")?;
-    println!("正在更新索引: {:?}", path);
+    let paths = get_directory_paths(args.path, "选择要更新的文件夹")?;
 
     // 打开数据库
     let mut db = Database::open(&args.db)?;
 
-    // 扫描目录
     let scanner = Scanner::new(args.workers);
-    let entries = scanner.scan_directory(&path)?;
 
-    // 显示进度条
-    let pb = create_progress_bar(entries.len() as u64, "更新文件");
+    let mut total_updated = 0;
+    let mut total_skipped = 0;
 
-    let mut updated = 0;
-    let mut skipped = 0;
+    for path in &paths {
+        println!("\n正在更新索引: {:?}", path);
 
-    // 增量更新
-    for entry in entries {
-        if db.needs_update(&entry)? {
-            db.upsert_file(&entry, args.fast_hash, args.full_hash)?;
-            updated += 1;
-        } else {
-            db.touch_file(&entry)?;
-            skipped += 1;
+        // 扫描目录
+        let entries = scanner.scan_directory(path)?;
+
+        // 显示进度条
+        let pb = create_progress_bar(entries.len() as u64, "更新文件");
+
+        let mut updated = 0;
+        let mut skipped = 0;
+
+        // 增量更新
+        for entry in entries {
+            if db.needs_update(&entry)? {
+                db.upsert_file(&entry, args.fast_hash, args.full_hash)?;
+                updated += 1;
+            } else {
+                db.touch_file(&entry)?;
+                skipped += 1;
+            }
+            pb.inc(1);
         }
-        pb.inc(1);
+
+        pb.finish_with_message("完成");
+        println!("  更新: {}, 跳过: {}", updated, skipped);
+
+        total_updated += updated;
+        total_skipped += skipped;
     }
 
-    pb.finish_with_message("更新完成");
-    println!("已更新: {}, 已跳过: {}", updated, skipped);
+    println!("\n总计 - 已更新: {}, 已跳过: {}", total_updated, total_skipped);
 
     Ok(())
 }

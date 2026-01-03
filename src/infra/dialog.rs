@@ -6,30 +6,55 @@
 use crate::infra::error::{DedupError, Result};
 use std::path::PathBuf;
 
-/// 打开文件夹选择对话框
+/// 打开文件夹选择对话框（单选）
+#[allow(dead_code)]
+pub fn pick_folder(title: &str) -> Result<PathBuf> {
+    let folder = rfd::FileDialog::new().set_title(title).pick_folder();
+
+    match folder {
+        Some(path) => Ok(path),
+        None => Err(DedupError::Cancelled),
+    }
+}
+
+/// 循环选择多个文件夹
 ///
-/// 弹出系统原生的文件夹选择对话框
-/// 如果用户取消选择，返回 Cancelled 错误
+/// 用户可以多次选择文件夹，直到点击取消结束
 ///
 /// # 参数
 /// - `title`: 对话框标题
 ///
 /// # 返回
-/// - 用户选择的文件夹路径
-///
-/// # 示例
-/// ```ignore
-/// let path = pick_folder("选择要扫描的文件夹")?;
-/// println!("用户选择了: {:?}", path);
-/// ```
-pub fn pick_folder(title: &str) -> Result<PathBuf> {
-    let folder = rfd::FileDialog::new()
-        .set_title(title)
-        .pick_folder();
+/// - 用户选择的所有文件夹路径列表
+pub fn pick_multiple_folders(title: &str) -> Result<Vec<PathBuf>> {
+    let mut folders = Vec::new();
 
-    match folder {
-        Some(path) => Ok(path),
-        None => Err(DedupError::Cancelled),
+    loop {
+        let msg = if folders.is_empty() {
+            format!("{}", title)
+        } else {
+            format!("{} (已选 {} 个，取消结束选择)", title, folders.len())
+        };
+
+        let folder = rfd::FileDialog::new().set_title(&msg).pick_folder();
+
+        match folder {
+            Some(path) => {
+                if !folders.contains(&path) {
+                    println!("已添加: {:?}", path);
+                    folders.push(path);
+                } else {
+                    println!("该文件夹已选择，跳过");
+                }
+            }
+            None => break,
+        }
+    }
+
+    if folders.is_empty() {
+        Err(DedupError::Cancelled)
+    } else {
+        Ok(folders)
     }
 }
 
